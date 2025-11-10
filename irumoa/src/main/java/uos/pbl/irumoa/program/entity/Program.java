@@ -25,9 +25,6 @@ public class Program {
     @Column(nullable = false, length = 255)
     private String title;
 
-    @Column(nullable = false, length = 100)
-    private String category;
-
     @Column(nullable = false, length = 500)
     private String link;
 
@@ -37,6 +34,19 @@ public class Program {
 
     private LocalDate appStartDate;
     private LocalDate appEndDate;
+
+    @ElementCollection(fetch = FetchType.LAZY)
+    @CollectionTable(
+            name = "program_category",
+            joinColumns = @JoinColumn(name = "program_id"),
+            uniqueConstraints = @UniqueConstraint(
+                    name = "uk_program_category",
+                    columnNames = {"program_id", "category"}
+            )
+    )
+    @Column(name = "category", length = 100, nullable = false)
+    private Set<String> categories = new LinkedHashSet<>();
+
 
     @ElementCollection(fetch = FetchType.LAZY)
     @CollectionTable(

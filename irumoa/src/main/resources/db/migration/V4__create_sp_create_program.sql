@@ -1,71 +1,121 @@
 DROP PROCEDURE IF EXISTS sp_create_program;
 DELIMITER $$
 
-CREATE PROCEDURE sp_create_program(IN p JSON, OUT out_program_id BIGINT)
+CREATE PROCEDURE sp_create_program(
+    IN p JSON,
+    OUT out_program_id BIGINT
+)
 BEGIN
-  DECLARE v_app_start VARCHAR(20);
-  DECLARE v_app_end   VARCHAR(20);
-  DECLARE v_pid BIGINT;
+    DECLARE v_title VARCHAR(255);
+    DECLARE v_link VARCHAR(500);
+    DECLARE v_content TEXT;
+    DECLARE v_app_start DATE;
+    DECLARE v_app_end DATE;
 
-  DECLARE EXIT HANDLER FOR SQLEXCEPTION
-  BEGIN
-    ROLLBACK;
-    RESIGNAL;
-  END;
+    DECLARE v_program_id BIGINT;
 
-  IF JSON_CONTAINS_PATH(p, 'all',
-        '$.title','$.category','$.link','$.content') = 0 THEN
-    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'missing required fields';
-  END IF;
+    DECLARE v_cat_len INT DEFAULT 0;
+    DECLARE v_dep_len INT DEFAULT 0;
+    DECLARE v_grade_len INT DEFAULT 0;
 
-  SET v_app_start = JSON_UNQUOTE(JSON_EXTRACT(p,'$.app_start_date'));
-  SET v_app_end   = JSON_UNQUOTE(JSON_EXTRACT(p,'$.app_end_date'));
+    DECLARE i INT DEFAULT 0;
 
-  START TRANSACTION;
+    -- 에러시 롤백
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        RESIGNAL;
+    END;
 
-  INSERT INTO program (title, category, link, content, app_start_date, app_end_date)
-  VALUES (
-    JSON_UNQUOTE(JSON_EXTRACT(p,'$.title')),
-    JSON_UNQUOTE(JSON_EXTRACT(p,'$.category')),
-    JSON_UNQUOTE(JSON_EXTRACT(p,'$.link')),
-    JSON_UNQUOTE(JSON_EXTRACT(p,'$.content')),
-    CAST(NULLIF(v_app_start,'') AS DATE),
-    CAST(NULLIF(v_app_end,'')   AS DATE)
-  );
+    -- 필수값 체크
+    IF JSON_CONTAINS_PATH(p, 'all',
+           '$.title', '$.link', '$.content') = 0 THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'missing required fields';
+    END IF;
 
-  SET v_pid = LAST_INSERT_ID();
+    SET v_title   = JSON_UNQUOTE(JSON_EXTRACT(p, '$.title'));
+    SET v_link    = JSON_UNQUOTE(JSON_EXTRACT(p, '$.link'));
+    SET v_content = JSON_UNQUOTE(JSON_EXTRACT(p, '$.content'));
 
-  INSERT IGNORE INTO program_department (program_id, department)
-  SELECT v_pid, jt.dept
-  FROM JSON_TABLE(
-         COALESCE(JSON_EXTRACT(p,'$.departments'),'[]'),
-         '$[*]' COLUMNS (dept VARCHAR(200) PATH '$')
-       ) jt
-  WHERE jt.dept IS NOT NULL
-  GROUP BY jt.dept;
+    SET v_app_start = NULL;
+    SET v_app_end   = NULL;
 
-  -- 디버그: 프로시저가 실제로 본 grades와 타입
-  SELECT JSON_EXTRACT(p,'$.grades')   AS dbg_grades,
-         JSON_TYPE(JSON_EXTRACT(p,'$.grades')) AS dbg_type;
+    IF JSON_CONTAINS_PATH(p, 'one', '$.app_start_date') = 1 THEN
+        SET v_app_start = STR_TO_DATE(
+            JSON_UNQUOTE(JSON_EXTRACT(p, '$.app_start_date')),
+            '%Y-%m-%d'
+        );
+    END IF;
 
-  -- 여기서 바로 리턴해보면, 에러가 아래 블록에서 나는지 확정됨
-  -- LEAVE 대신 RETURN 효과: OUT 파라미터만 셋팅해서 나가기
-  SET out_program_id = v_pid;
-  -- 주석 해제해서 한 번 실행해보세요.
-  -- LEAVE_PROC: 
-  -- LEAVE_PROC END;
+    IF JSON_CONTAINS_PATH(p, 'one', '$.app_end_date') = 1 THEN
+        SET v_app_end = STR_TO_DATE(
+            JSON_UNQUOTE(JSON_EXTRACT(p, '$.app_end_date')),
+            '%Y-%m-%d'
+        );
+    END IF;
 
-  -- grades 블록(지금은 아직 기존)
-  INSERT IGNORE INTO program_grade (program_id, grade)
-  SELECT v_pid, CAST(jt.g AS UNSIGNED)
-  FROM JSON_TABLE(
-         COALESCE(JSON_EXTRACT(p,'$.grades'),'[]'),
-         '$[*]' COLUMNS (g VARCHAR(32) PATH '$')
-       ) jt
-  WHERE jt.g REGEXP '^[0-9]+$'
-  GROUP BY jt.g;
+    START TRANSACTION;
 
-  COMMIT;
-  SET out_program_id = v_pid;
+    -- 1. program insert
+    INSERT INTO program (title, link, content, app_start_date, app_end_date)
+    VALUES (v_title, v_link, v_content, v_app_start, v_app_end);
+
+    SET v_program_id = LAST_INSERT_ID();
+
+    -- 2. categories 배열 처리
+    IF JSON_CONTAINS_PATH(p, 'one', '$.categories') = 1 THEN
+        SET v_cat_len = JSON_LENGTH(JSON_EXTRACT(p, '$.categories'));
+        SET i = 0;
+        WHILE i < v_cat_len DO
+            INSERT INTO program_category (program_id, category)
+            VALUES (
+                v_program_id,
+                JSON_UNQUOTE(
+                    JSON_EXTRACT(p, CONCAT('$.categories[', i, ']'))
+                )
+            );
+            SET i = i + 1;
+        END WHILE;
+    END IF;
+
+    -- 3. departments 배열 처리
+    IF JSON_CONTAINS_PATH(p, 'one', '$.departments') = 1 THEN
+        SET v_dep_len = JSON_LENGTH(JSON_EXTRACT(p, '$.departments'));
+        SET i = 0;
+        WHILE i < v_dep_len DO
+            INSERT INTO program_department (program_id, department)
+            VALUES (
+                v_program_id,
+                JSON_UNQUOTE(
+                    JSON_EXTRACT(p, CONCAT('$.departments[', i, ']'))
+                )
+            );
+            SET i = i + 1;
+        END WHILE;
+    END IF;
+
+    -- 4. grades 배열 처리
+    IF JSON_CONTAINS_PATH(p, 'one', '$.grades') = 1 THEN
+        SET v_grade_len = JSON_LENGTH(JSON_EXTRACT(p, '$.grades'));
+        SET i = 0;
+        WHILE i < v_grade_len DO
+            INSERT INTO program_grade (program_id, grade)
+            VALUES (
+                v_program_id,
+                CAST(
+                    JSON_UNQUOTE(
+                        JSON_EXTRACT(p, CONCAT('$.grades[', i, ']'))
+                    ) AS SIGNED
+                )
+            );
+            SET i = i + 1;
+        END WHILE;
+    END IF;
+
+    COMMIT;
+
+    SET out_program_id = v_program_id;
 END$$
+
 DELIMITER ;
