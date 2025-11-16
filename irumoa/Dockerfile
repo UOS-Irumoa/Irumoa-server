@@ -14,6 +14,8 @@ RUN ./gradlew --no-daemon -q help || true
 
 COPY . .
 
+RUN chmod +x ./gradlew
+
 RUN ./gradlew --no-daemon clean bootJar -x test
 
 # ---- Runtime stage ----
