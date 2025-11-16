@@ -7,7 +7,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: UOS-Irumoa/Irumoa-server
+  IMAGE_NAME: uos-irumoa/irumoa-server
   IMAGE_TAG: release
 
 jobs:
