@@ -6,6 +6,7 @@ import jakarta.persistence.criteria.Predicate;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,7 +38,11 @@ public class ProgramService {
     public NoticeSearchPageResponse searchNotices(NoticeSearchRequest request) {
         Specification<Program> spec = buildSpecification(request);
         
-        Pageable pageable = PageRequest.of(request.getPage(), request.getSize());
+        Pageable pageable = PageRequest.of(
+            request.getPage(), 
+            request.getSize(),
+            Sort.by(Sort.Direction.DESC, "appStartDate")
+        );
         
         Page<Program> programPage = programRepository.findAll(spec, pageable);
         
