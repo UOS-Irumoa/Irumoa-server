@@ -78,15 +78,19 @@ public class ProgramService {
                         cb.greaterThan(root.get("appStartDate"), now)
                     );
                 } else if ("모집중".equals(state)) {
-                    // appStartDate <= now AND appEndDate >= now
+                    // (시작일 <= 오늘) AND (마감일 >= 오늘 OR 마감일 IS NULL)
+                    // appEndDate가 null이면 '마감 기한 없음(계속 모집)'으로 간주
                     Predicate startDatePredicate = cb.lessThanOrEqualTo(root.get("appStartDate"), now);
-                    Predicate endDatePredicate = cb.greaterThanOrEqualTo(root.get("appEndDate"), now);
+                    Predicate endDateNotNullAndValid = cb.greaterThanOrEqualTo(root.get("appEndDate"), now);
+                    Predicate endDateIsNull = cb.isNull(root.get("appEndDate"));
+                    Predicate endDatePredicate = cb.or(endDateNotNullAndValid, endDateIsNull);
                     predicate = cb.and(predicate, startDatePredicate, endDatePredicate);
                 } else if ("모집완료".equals(state)) {
-                    // appEndDate < now
-                    predicate = cb.and(predicate, 
-                        cb.lessThan(root.get("appEndDate"), now)
-                    );
+                    // (마감일 IS NOT NULL) AND (마감일 < 오늘)
+                    // appEndDate가 null이면 절대 마감되지 않은 것이므로, null이 아닌 경우에만 마감 여부를 체크
+                    Predicate endDateNotNull = cb.isNotNull(root.get("appEndDate"));
+                    Predicate endDateBeforeNow = cb.lessThan(root.get("appEndDate"), now);
+                    predicate = cb.and(predicate, endDateNotNull, endDateBeforeNow);
                 }
             }
 
